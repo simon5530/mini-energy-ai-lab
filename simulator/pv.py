@@ -26,6 +26,8 @@ class PVGenerator:
         hour = timestamp.hour + timestamp.minute / 60
         if hour <= self.config.sunrise_hour or hour >= self.config.sunset_hour:
             return 0.0
+        # Map daylight to [0, pi].  The sine curve is zero at sunrise/sunset
+        # and peaks at solar noon; it is a teaching profile, not a PV forecast.
         daylight_fraction = (hour - self.config.sunrise_hour) / (
             self.config.sunset_hour - self.config.sunrise_hour
         )

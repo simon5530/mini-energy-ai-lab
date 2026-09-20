@@ -19,3 +19,10 @@ def test_simulation_values_evolve_and_grid_balance_is_explicit() -> None:
             row.factory_load_kw - row.pv_power_kw + row.battery_power_kw
         )
         assert 20 <= row.battery_soc_pct <= 90
+
+
+def test_simulation_rejects_non_positive_step_count() -> None:
+    config = load_config(Path("config/system.yaml"))
+
+    with pytest.raises(ValueError, match="steps"):
+        run_simulation(config, steps=0, seed=7)

@@ -7,13 +7,14 @@
 Mini Energy AI Lab is a staged project for learning how industrial energy
 software is structured. Phase 0 models a Taiwanese commercial/industrial site
 with synthetic factory load, solar PV, grid import, and one battery energy
-storage system (BESS). Later phases are intentionally absent until Phase 0 has
-been reviewed.
+storage system (BESS). Phase 1 adds a validated, versioned telemetry boundary
+without connecting the simulator to a real device, broker, or database.
 
-## Phase 0 scope
+## Implemented scope
 
-This phase is a **Model-in-the-Loop / early system-modelling exercise**. It
-contains:
+### Phase 0 — system model
+
+This **Model-in-the-Loop / early system-modelling exercise** contains:
 
 - a configurable battery energy-balance model;
 - synthetic factory load and clear-sky PV profiles;
@@ -22,6 +23,21 @@ contains:
 
 The fixed battery schedule in the CLI exists only to make state change visible.
 It is **not** EMS logic and does not optimize cost or grid demand.
+
+### Phase 1 — synthetic telemetry
+
+The simulator now turns every interval into a `TelemetryRecord` with:
+
+- schema version, source, quality, step index, and offset-aware timestamp;
+- the interval duration and all values with explicit kW, %, or °C units;
+- requested versus actually applied battery power;
+- an optional reason when a power or SOC constraint changes the request;
+- executable validation for finite numbers, SOC range, timestamps, and site
+  power balance;
+- human-readable table, newline-delimited JSON (JSONL), and CSV encoders.
+
+This phase establishes a local data contract. It does **not** add MQTT, Modbus,
+OPC UA, cloud ingestion, persistent storage, or real-time device telemetry.
 
 ## Run locally
 
@@ -32,12 +48,40 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
 mini-energy-sim --steps 24
+mini-energy-sim --steps 24 --format jsonl
+mini-energy-sim --steps 24 --format csv --output output/telemetry.csv
 pytest
 ```
 
 Configuration lives in [`config/system.yaml`](config/system.yaml). The default
 15-minute step is simulated immediately; the CLI does not sleep in real time.
 Pass `--seed` to change the reproducible factory-load noise.
+
+JSONL is useful for replay or line-by-line streaming because each line is a
+complete JSON object. CSV is convenient for spreadsheet inspection. The
+default table remains intended for people, not machine ingestion.
+
+## Read the code as a learning path
+
+The most important execution path is intentionally small:
+
+1. [`simulator/cli.py`](simulator/cli.py) loads configuration and advances
+   logical simulation time.
+2. [`simulator/factory.py`](simulator/factory.py) and
+   [`simulator/pv.py`](simulator/pv.py) generate deterministic synthetic input
+   signals.
+3. [`simulator/bess.py`](simulator/bess.py) constrains the requested power,
+   converts power and elapsed time into stored energy, and updates SOC.
+4. `run_simulation` applies the site power-balance equation and creates a
+   validated [`TelemetryRecord`](simulator/telemetry.py).
+5. [`simulator/telemetry.py`](simulator/telemetry.py) serializes the same record
+   as JSONL or CSV without changing the simulation.
+
+Comments in those files explain intent, units, boundaries, and non-obvious
+decisions. Tests are the executable contract: start with
+[`tests/test_bess.py`](tests/test_bess.py), then
+[`tests/test_simulation.py`](tests/test_simulation.py), and finally
+[`tests/test_telemetry.py`](tests/test_telemetry.py).
 
 ## Model and units
 
@@ -107,7 +151,7 @@ not emulate actual BMS or PCS firmware.
   are out of scope.
 - The model uses a fixed time step and treats power as constant within it.
 - No MQTT, Modbus, EMS control, MCP, LLM, approval flow, or real hardware is
-  included in Phase 0.
+  included through Phase 1.
 - The software makes no production-safety, standards-compliance, or commercial
   performance claim.
 
@@ -124,8 +168,10 @@ them.
 
 The planned learning path is simulation → telemetry → industrial protocol →
 deterministic EMS → optional agent supervision → human approval → fault tests.
-Only the first item is implemented. Each later phase requires a separate review
-and commit.
+The first two items are implemented. The next bounded phase is a **local-only
+industrial-protocol adapter** driven exclusively by synthetic records. It must
+not connect to a real PLC, meter, inverter, BMS, PCS, or operational network.
+Each later phase requires a separate review and commit.
 
 ## License
 

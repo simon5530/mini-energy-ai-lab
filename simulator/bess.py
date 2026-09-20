@@ -58,6 +58,9 @@ class BatterySimulator:
         if duration_hours <= 0:
             raise ValueError("duration_hours must be positive")
 
+        # Apply constraints in two stages so telemetry can explain *why* the
+        # final setpoint differs from the request.  PCS-like power limits are
+        # checked first; stored-energy/SOC limits are checked second.
         power_limited = max(
             -self.config.max_discharge_power_kw,
             min(requested_power_kw, self.config.max_charge_power_kw),
@@ -72,6 +75,9 @@ class BatterySimulator:
         if abs(applied_power_kw - power_limited) > self._EPSILON:
             limit_reason = "soc_limit"
 
+        # Power (kW) becomes energy (kWh) only after multiplying by elapsed
+        # hours.  Efficiency is directional: charging loses energy before it
+        # reaches storage, while discharging removes extra energy from storage.
         if applied_power_kw >= 0:
             stored_energy_delta_kwh = (
                 applied_power_kw
@@ -86,6 +92,8 @@ class BatterySimulator:
             )
 
         self.soc_pct += stored_energy_delta_kwh / self.config.capacity_kwh * 100
+        # Floating-point arithmetic can leave a tiny overshoot such as
+        # 90.0000000001; clamp the persisted state to the physical model range.
         self.soc_pct = max(
             self.config.min_soc_pct,
             min(self.soc_pct, self.config.max_soc_pct),
@@ -113,6 +121,8 @@ class BatterySimulator:
         self, power_kw: float, duration_hours: float
     ) -> float:
         if power_kw >= 0:
+            # Convert the remaining SOC headroom back into the largest safe
+            # grid-side charging power for this time interval.
             headroom_kwh = (
                 (self.config.max_soc_pct - self.soc_pct)
                 / 100
@@ -123,6 +133,8 @@ class BatterySimulator:
             )
             return min(power_kw, max(0.0, maximum_from_soc_kw))
 
+        # For discharge, usable stored energy is the energy above minimum SOC.
+        # Multiplying by efficiency gives the power deliverable at the boundary.
         available_kwh = (
             (self.soc_pct - self.config.min_soc_pct)
             / 100
